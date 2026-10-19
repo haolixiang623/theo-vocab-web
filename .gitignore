@@ -1,0 +1,13 @@
+# macOS
+.DS_Store
+
+# 依赖（前端工具链如有）
+node_modules/
+
+# 日志
+*.log
+
+# 编辑器 / IDE
+.vscode/
+.idea/
+*.swp

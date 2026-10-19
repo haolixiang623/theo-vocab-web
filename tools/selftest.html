@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>自检</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- 与 index.html 相同的结构（简化版，直接复用 app.js） -->
+  <button class="sidebar-toggle" id="sidebarToggle">📋</button>
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
+  <aside class="sidebar" id="vocabSidebar">
+    <div class="sidebar-header"><h3>总览</h3><button id="closeSidebarBtn">✕</button></div>
+    <input type="search" class="sidebar-search" id="sidebarSearch">
+    <div class="sidebar-stats" id="sidebarStats"></div>
+    <div class="sidebar-list" id="sidebarList"></div>
+  </aside>
+  <main class="container">
+    <header class="app-header"><h1>自检</h1><button id="darkModeToggle">🌓</button></header>
+    <section class="controls">
+      <select id="chapterSelect" class="select-style"></select>
+      <div class="mode-group" id="modeGroup">
+        <button class="mode-btn" data-mode="chinese">📖 看中文</button>
+        <button class="mode-btn" data-mode="audio">🔊 听音</button>
+        <button class="mode-btn active" data-mode="random">🎲 随机</button>
+      </div>
+    </section>
+    <section class="controls controls-sub">
+      <div class="tool-group">
+        <button id="hintToggle" class="tool-btn">💡 提示</button>
+        <button id="timerToggle" class="tool-btn">⏱️ 计时</button>
+        <button id="keyboardToggle" class="tool-btn">⌨️ 软键盘</button>
+      </div>
+      <div class="goal-progress" id="goalDisplay">
+        <span>🎯</span><span id="goalCount">0/50</span>
+        <div class="goal-bar"><div class="goal-fill" id="goalFill"></div></div>
+        <button id="setGoalBtn">⚙️</button>
+      </div>
+    </section>
+    <div id="timerDisplay" class="mode-indicator timer-row" hidden>
+      <span>⏳ 剩余时间</span><span class="timer-display" id="timerSeconds">10</span><span>秒</span>
+    </div>
+    <div class="progress-row">
+      <span class="progress-label">📊 进度 <strong id="progressText">0/0</strong></span>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+    </div>
+    <div class="stats">
+      <span>✅ 正确 <strong id="correctCount">0</strong></span>
+      <span>❌ 错误 <strong id="wrongCount">0</strong></span>
+      <span>🔥 连续 <strong id="streakCount">0</strong></span>
+    </div>
+    <div class="mode-indicator">
+      <span id="modeIcon">🎲</span><span id="modeText">准备开始</span><span class="speech-status" id="speechStatus"></span>
+    </div>
+    <div class="question-area">
+      <div class="chinese-meaning" id="chineseDisplay"></div>
+      <button id="audioPlayBtn" class="audio-play-btn" hidden>🔊 再读一次</button>
+    </div>
+    <div class="letter-slots" id="letterSlots"></div>
+    <div class="result-area" id="resultArea"></div>
+    <div class="word-card" id="wordCard" hidden>
+      <div class="word-card-head">
+        <span class="wc-word" id="wcWord"></span><span class="wc-phonetic" id="wcPhonetic"></span>
+        <span class="wc-pos" id="wcPos"></span><span class="wc-tag" id="wcTag"></span>
+      </div>
+      <div class="wc-row" id="wcMeaning"></div><div class="wc-row" id="wcRoot"></div><div class="wc-row" id="wcExtra"></div>
+      <div class="wc-example"><p id="wcExampleEN"></p><p id="wcExampleCN"></p></div>
+    </div>
+    <div class="soft-keyboard" id="softKeyboard" hidden>
+      <div class="kb-row"></div><div class="kb-row"></div><div class="kb-row"></div><div class="kb-row kb-row-4"></div>
+    </div>
+    <div class="actions">
+      <button id="addNewWordBtn">📌 生词</button>
+      <button id="skipBtn">⏭️ 跳过</button>
+      <button id="restartBtn">🔄 重新开始</button>
+      <button id="repeatBtn">🔊 再读一次</button>
+      <button id="nextBtn" class="primary">⏎ 提交 / 下一题</button>
+    </div>
+    <p class="footer-note">note</p>
+    <section class="books">
+      <div class="book-panel">
+        <div class="book-header" id="wrongBookToggle"><h3>📕 错题本 (<span id="wrongBookCount">0</span>)</h3><span class="arrow">▼</span></div>
+        <div class="book-list" id="wrongList"></div>
+        <button id="clearWrongBtn" class="clear-btn">清空</button>
+      </div>
+      <div class="book-panel">
+        <div class="book-header" id="newWordBookToggle"><h3>📗 生词本 (<span id="newWordCount">0</span>)</h3><span class="arrow">▼</span></div>
+        <div class="book-list" id="newWordList"></div>
+        <button id="clearNewWordsBtn" class="clear-btn">清空</button>
+      </div>
+    </section>
+    <button id="reviewBookBtn" class="primary review-btn">📚 复习错题 + 生词</button>
+    <footer class="app-footer"><p>footer</p><p id="dataInfo"></p></footer>
+  </main>
+  <div class="modal" id="modalRoot" hidden><div class="modal-content" id="modalContent"></div></div>
+
+  <pre id="testOutput" style="position:fixed;left:0;top:0;background:#fff;z-index:9999;font-size:12px;max-width:100%;"></pre>
+  <script src="../js/data.js"></script>
+  <script src="../js/app.js"></script>
+  <script>
+    /* 自动化自检：模拟真实键盘事件走完整答题流程，并验证刷新后状态恢复 */
+    (function () {
+      var out = [];
+      var pass = 0, fail = 0;
+      function ok(cond, name) {
+        if (cond) { pass++; out.push('PASS ' + name); }
+        else { fail++; out.push('FAIL ' + name); }
+        document.getElementById('testOutput').textContent =
+          out.join('\n') + '\n\nRESULT: ' + pass + ' passed, ' + fail + ' failed' + (fail ? ' <<< FAILURES' : ' <<< ALL PASS');
+      }
+      function key(k) {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+      }
+      function click(el) { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); }
+      function typeWord(w) { w.split('').forEach(key); }
+
+      var phase = localStorage.getItem('selftest-phase');
+
+      if (phase === 'verify') {
+        /* ---- 阶段二：刷新后验证状态恢复 ---- */
+        var app = window.__vocab;
+        var prev = localStorage.getItem('selftest-results') || '(phase 1 results missing)';
+        out.push('--- phase 1 (before reload) ---');
+        out.push(prev);
+        out.push('--- phase 2 (after reload) ---');
+        ok(!!app, 'debug handle exists after reload');
+        ok(app.getPool().length === 168, 'chapter 3 pool restored (168 words), got ' + app.getPool().length);
+        ok(app.getBooks().wrong.length === 1, 'wrong book restored (1), got ' + app.getBooks().wrong.length);
+        ok(app.getBooks().fresh.length === 1, 'fresh book restored (1), got ' + app.getBooks().fresh.length);
+        var st1 = app.getChapterStats(1);
+        ok(Object.keys(st1.mastery).length === 1, 'chapter 1 mastery persisted (1), got ' + Object.keys(st1.mastery).length);
+        ok(app.getDaily().count === 2 && app.getDaily().goal === 30, 'daily count/goal restored: ' + JSON.stringify(app.getDaily()));
+        ok(document.getElementById('goalCount').textContent === '2/30', 'goal display restored, got ' + document.getElementById('goalCount').textContent);
+        localStorage.removeItem('selftest-phase');
+        localStorage.removeItem('selftest-results');
+        return;
+      }
+
+      /* ---- 阶段一：完整交互测试 ---- */
+      var app = window.__vocab;
+      /* 全新用户首次进入会弹出引导层，先关掉以免它拦截回车提交 */
+      if (!document.getElementById('modalRoot').hidden) document.getElementById('modalRoot').hidden = true;
+      ok(!!app, 'debug handle exists');
+      ok(document.querySelectorAll('#chapterSelect option').length === 22, '22 chapter options');
+      ok(app.getPool().length === 227, 'chapter 1 pool = 227, got ' + app.getPool().length);
+
+      /* 1. 答对一题 */
+      var w1 = app.getCurrentWord();
+      ok(!!w1, 'current word loaded: ' + (w1 && w1.word));
+      typeWord(w1.word);
+      key('Enter');
+      var c = app.getCounts();
+      ok(c.correct === 1 && c.completed === 1, 'correct answer counted: ' + JSON.stringify(c));
+      ok(document.getElementById('resultArea').textContent.indexOf('正确') >= 0, 'result shows correct');
+      ok(!document.getElementById('wordCard').hidden, 'word card shown after answer');
+      ok(document.querySelectorAll('#letterSlots .slot.correct').length === w1.word.length, 'all slots green');
+
+      /* 2. 跳过一题（不计成绩） */
+      click(document.getElementById('skipBtn'));
+      ok(app.getCounts().completed === 1, 'skip does not count, completed still 1');
+
+      /* 3. 答错一题（进错题本） */
+      var w2 = app.getCurrentWord();
+      key('x'); // 首字母故意答错
+      for (var i = 1; i < w2.word.length; i++) key(w2.word[i]);
+      key('Enter');
+      c = app.getCounts();
+      ok(c.wrong === 1, 'wrong answer counted: ' + JSON.stringify(c));
+      ok(app.getBooks().wrong.length === 1, 'wrong book has 1 word');
+      ok(document.getElementById('wrongBookCount').textContent === '1', 'wrong book badge = 1');
+      ok(document.querySelectorAll('#letterSlots .slot.wrong').length >= 1, 'wrong slot marked red');
+
+      /* 4. 加入生词本（先跳到下一题，保证与错题本不是同一个词） */
+      click(document.getElementById('skipBtn'));
+      click(document.getElementById('addNewWordBtn'));
+      ok(app.getBooks().fresh.length === 1, 'fresh book has 1 word');
+      ok(app.getBooks().fresh[0].key !== app.getBooks().wrong[0].key, 'fresh book word differs from wrong book word');
+      ok(document.getElementById('newWordCount').textContent === '1', 'fresh book badge = 1');
+
+      /* 5. 复习模式 */
+      click(document.getElementById('reviewBookBtn'));
+      ok(app.isReviewMode(), 'review mode entered');
+      ok(app.getPool().length === 2, 'review pool = 2 words, got ' + app.getPool().length);
+
+      /* 6. 侧边栏 */
+      click(document.getElementById('sidebarToggle'));
+      ok(document.getElementById('vocabSidebar').classList.contains('open'), 'sidebar opens');
+      ok(document.querySelectorAll('#sidebarList .sidebar-item').length === 2, 'sidebar lists 2 review words');
+      document.getElementById('sidebarSearch').value = 'zzzznotfound';
+      document.getElementById('sidebarSearch').dispatchEvent(new Event('input', { bubbles: true }));
+      ok(document.querySelectorAll('#sidebarList .sidebar-item[data-key]').length === 0, 'sidebar search filters');
+
+      /* 7. 章节切换（退出复习模式） */
+      var sel = document.getElementById('chapterSelect');
+      sel.value = '3';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      ok(!app.isReviewMode(), 'chapter switch exits review mode');
+      ok(app.getPool().length === 168, 'chapter 3 pool = 168, got ' + app.getPool().length);
+
+      /* 8. 软键盘 */
+      click(document.getElementById('keyboardToggle'));
+      ok(!document.getElementById('softKeyboard').hidden, 'soft keyboard toggles on');
+      ok(document.querySelectorAll('#softKeyboard .kb-key').length === 31, '31 keyboard keys');
+
+      /* 9. 深色模式 */
+      click(document.getElementById('darkModeToggle'));
+      ok(document.body.classList.contains('dark'), 'dark mode toggles');
+
+      /* 10. 提示模式 */
+      click(document.getElementById('hintToggle'));
+      var w3 = app.getCurrentWord();
+      ok(document.querySelectorAll('#letterSlots .slot.hint').length === 1, 'hint fills first letter');
+
+      /* 11. 每日目标设置 */
+      click(document.getElementById('setGoalBtn'));
+      ok(!document.getElementById('modalRoot').hidden, 'goal modal opens');
+      document.getElementById('goalInput').value = '30';
+      click(document.querySelector('#modalContent .modal-actions button.primary'));
+      ok(app.getDaily().goal === 30, 'daily goal updated to 30');
+
+      /* 进入阶段二：刷新验证恢复 */
+      localStorage.setItem('selftest-phase', 'verify');
+      localStorage.setItem('selftest-results', out.join('\n'));
+      out.push('--- reloading to verify persistence ---');
+      document.getElementById('testOutput').textContent = out.join('\n');
+      location.reload();
+    })();
+  </script>
+</body>
+</html>
