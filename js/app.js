@@ -6,14 +6,42 @@
 (function () {
   'use strict';
 
-  /* ---------- 数据 ---------- */
-  var DATA = window.VOCAB_DATA;
-  if (!DATA || !DATA.chapters) {
-    document.getElementById('dataInfo').textContent = '⚠️ 未找到词汇数据 js/data.js';
+  /* ---------- 数据（支持按章节懒加载） ---------- */
+  var VOCAB = { chapters: {} };            // 懒加载后的章节词库
+  var META = window.VOCAB_META || null;   // 部署态：章节索引（含分片文件名）
+  window.VOCAB_CHUNKS = window.VOCAB_CHUNKS || {};
+  var DEV = window.VOCAB_DATA || null;     // 开发态：js/data.js 整体载入
+  if (DEV && DEV.chapters) {
+    Object.keys(DEV.chapters).forEach(function (k) { VOCAB.chapters[k] = DEV.chapters[k]; });
+    if (!META) {
+      META = Object.keys(DEV.chapters).map(function (k) { return { id: Number(k), count: DEV.chapters[k].length }; });
+    }
+  }
+  if (!META || !META.length) {
+    document.getElementById('dataInfo').textContent = '⚠️ 未找到词汇数据';
     return;
   }
-  var CHAPTER_IDS = Object.keys(DATA.chapters).map(Number).sort(function (a, b) { return a - b; });
-  var TOTAL_WORDS = CHAPTER_IDS.reduce(function (s, id) { return s + DATA.chapters[id].length; }, 0);
+  var CHAPTER_IDS = META.map(function (m) { return m.id; }).sort(function (a, b) { return a - b; });
+  var TOTAL_WORDS = META.reduce(function (s, m) { return s + (m.count || 0); }, 0);
+
+  /* 按章节懒加载：返回该章词数组的 Promise（已加载则立即返回） */
+  var chapterPromises = {};
+  function loadChapter(id) {
+    id = Number(id);
+    if (VOCAB.chapters[id]) return Promise.resolve(VOCAB.chapters[id]);
+    if (chapterPromises[id]) return chapterPromises[id];
+    var m = META.filter(function (x) { return x.id === id; })[0];
+    if (!m || !m.file) return Promise.resolve(VOCAB.chapters[id] || []);
+    chapterPromises[id] = new Promise(function (resolve) {
+      var s = document.createElement('script');
+      s.src = m.file;
+      s.onload = function () { VOCAB.chapters[id] = window.VOCAB_CHUNKS[id] || []; resolve(VOCAB.chapters[id]); };
+      s.onerror = function () { resolve(VOCAB.chapters[id] || []); };
+      document.head.appendChild(s);
+    });
+    return chapterPromises[id];
+  }
+  function loadChapters(ids) { return Promise.all(ids.map(loadChapter)); }
 
   /* ---------- DOM ---------- */
   var $ = function (id) { return document.getElementById(id); };
@@ -40,6 +68,7 @@
   var softKeyboard = $('softKeyboard');
   var modalRoot = $('modalRoot'), modalContent = $('modalContent');
   var darkModeToggle = $('darkModeToggle');
+  var voiceSelect = $('voiceSelect');
   $('dataInfo').textContent = '共 ' + CHAPTER_IDS.length + ' 章 · ' + TOTAL_WORDS + ' 词';
 
   /* ---------- 常量 ---------- */
@@ -73,11 +102,17 @@
   function wordKey(w) { return w.chapter + ':' + w.id; }
   function findWord(key) {
     var parts = key.split(':');
-    var ch = DATA.chapters[Number(parts[0])] || [];
+    var ch = VOCAB.chapters[Number(parts[0])] || [];
     for (var i = 0; i < ch.length; i++) if (String(ch[i].id) === parts[1]) return ch[i];
     return null;
   }
-  function chapterWordCount(id) { return (DATA.chapters[id] || []).length; }
+  function chapterWordCount(id) {
+    var loaded = VOCAB.chapters[id];
+    if (loaded) return loaded.length;
+    /* 章节尚未懒加载时，回退到 META 中记录的词数（部署态下拉框构建早于分片加载） */
+    var m = META.filter(function (x) { return x.id === Number(id); })[0];
+    return m ? (m.count || 0) : 0;
+  }
 
   /* ---------- 音效与语音 ---------- */
   var audioCtx = null;
@@ -106,6 +141,53 @@
   function playWrong() { playTone(300, 0.15, 'square'); setTimeout(function () { playTone(200, 0.2, 'square'); }, 150); }
 
   var voices = [], speechReady = false;
+  var SELECTED_VOICE = null, DEFAULT_VOICE = null;
+  var VOICE_KEY = 'theo-vocab-web-voice';
+  // 偏好顺序（靠前优先）：尽量默认选自然/女声，覆盖 macOS / Windows / Chrome 常见语音名
+  var VOICE_PREF = ['Samantha', 'Google US English', 'Microsoft Zira Desktop', 'Microsoft Zira',
+                   'Victoria', 'Karen', 'Tessa', 'Moira', 'Allison', 'Google UK English',
+                   'Daniel', 'Microsoft David Desktop'];
+
+  /* 用浏览器提供的英文语音填满下拉框，并按已保存/默认偏好预选 */
+  function refreshVoiceList() {
+    if (!window.speechSynthesis || !voiceSelect) return;
+    var all = speechSynthesis.getVoices();
+    voices = all;
+    var en = all.filter(function (v) { return /^en/i.test(v.lang || ''); });
+    if (!en.length) en = all;
+    var prev = null;
+    try { prev = localStorage.getItem(VOICE_KEY); } catch (e) { /* 隐私模式忽略 */ }
+    if (!DEFAULT_VOICE) {
+      for (var i = 0; i < VOICE_PREF.length; i++) {
+        if (en.some(function (v) { return v.name === VOICE_PREF[i]; })) { DEFAULT_VOICE = VOICE_PREF[i]; break; }
+      }
+    }
+    var initial = (prev !== null) ? prev : (DEFAULT_VOICE || '');
+    if (initial && !en.some(function (v) { return v.name === initial; })) initial = '';
+    voiceSelect.innerHTML = '';
+    var o0 = document.createElement('option');
+    o0.value = ''; o0.textContent = '系统默认'; voiceSelect.appendChild(o0);
+    en.forEach(function (v) {
+      var o = document.createElement('option');
+      o.value = v.name; o.textContent = v.name + ' (' + v.lang + ')';
+      voiceSelect.appendChild(o);
+    });
+    voiceSelect.value = initial;
+    SELECTED_VOICE = initial;
+  }
+
+  /* 选出本次发音要用的 Voice 对象：用户选择 > 默认偏好 > 系统首个 en-US/en */
+  function pickVoice() {
+    if (!voices.length && window.speechSynthesis) voices = speechSynthesis.getVoices();
+    if (SELECTED_VOICE) {
+      var v = voices.filter(function (x) { return x.name === SELECTED_VOICE; })[0];
+      if (v) return v;
+    }
+    return voices.filter(function (x) { return x.lang === 'en-US'; })[0]
+        || voices.filter(function (x) { return /^en/i.test(x.lang); })[0]
+        || null;
+  }
+
   function loadVoices() {
     return new Promise(function (resolve) {
       if (!window.speechSynthesis) return resolve();
@@ -135,9 +217,8 @@
           if (voices.length === 0) voices = speechSynthesis.getVoices();
           var u = new SpeechSynthesisUtterance(word);
           u.lang = 'en-US'; u.rate = 0.9; u.volume = 1;
-          var pref = voices.filter(function (v) { return v.lang === 'en-US'; })[0]
-                 || voices.filter(function (v) { return /^en/i.test(v.lang); })[0];
-          if (pref) u.voice = pref;
+          var v = pickVoice();
+          if (v) u.voice = v;
           u.onstart = function () { speechStatus.textContent = '🔊 播放中'; };
           u.onend = function () { speechStatus.textContent = ''; };
           u.onerror = function () { speechStatus.textContent = '⚠️'; };
@@ -204,11 +285,13 @@
 
   function switchChapter(id) {
     reviewMode = false;
-    var words = DATA.chapters[id] || [];
-    if (!words.length) return;
-    setPool(words);
-    updateWrongBookUI(); updateNewWordBookUI(); updateSidebar();
-    loadNextWord(); updateStats(); saveState();
+    return loadChapter(id).then(function (words) {
+      words = words || [];
+      if (!words.length) return;
+      setPool(words);
+      updateWrongBookUI(); updateNewWordBookUI(); updateSidebar();
+      loadNextWord(); updateStats(); saveState();
+    });
   }
 
   function getChapterStats(id) {
@@ -227,12 +310,16 @@
       return !wrongBook.some(function (wb) { return wb.key === w.key; });
     }));
     if (!all.length) { showModal('<h2>📚 复习</h2><p>错题本和生词本都为空，先去刷词吧！</p>', [{ text: '知道啦', primary: true }]); return; }
-    reviewMode = true;
-    var words = all.map(function (w) { return findWord(w.key); }).filter(Boolean);
-    setPool(words);
-    updateSidebar();
-    loadNextWord(); updateStats(); saveState();
-    showModal('<h2>📚 复习模式</h2><p>已加载 <strong>' + words.length + '</strong> 个错题和生词，加油！</p>', [{ text: '开始', primary: true }]);
+    var ids = all.map(function (w) { return Number(w.key.split(':')[0]); });
+    loadChapters(ids).then(function () {
+      reviewMode = true;
+      var words = all.map(function (w) { return findWord(w.key); }).filter(Boolean);
+      if (!words.length) { showModal('<h2>📚 复习</h2><p>没有可复习的单词。</p>', [{ text: '知道啦', primary: true }]); return; }
+      setPool(words);
+      updateSidebar();
+      loadNextWord(); updateStats(); saveState();
+      showModal('<h2>📚 复习模式</h2><p>已加载 <strong>' + words.length + '</strong> 个错题和生词，加油！</p>', [{ text: '开始', primary: true }]);
+    });
   }
 
   /* ---------- 出题与渲染 ---------- */
@@ -437,7 +524,7 @@
   }
 
   function bookChip(w, type) {
-    return '<div class="word-chip' + (type === 'new' ? ' new-word' : '') + '" data-key="' + w.key + '" title="点击发音">' +
+    return '<div class="word-chip' + (type === 'new' ? ' new-word' : '') + '" data-key="' + w.key + '" data-word="' + escapeHtml(w.word) + '" title="点击发音">' +
       '<span class="chip-word">' + escapeHtml(w.word) + '</span>' +
       '<span class="chip-meaning">' + escapeHtml(w.meaningCN) + '</span>' +
       '<span class="chip-remove" data-remove="' + w.key + '" title="移除">✕</span></div>';
@@ -461,8 +548,7 @@
     });
     Array.prototype.forEach.call(listEl.querySelectorAll('.word-chip:not(.empty-tip)'), function (chip) {
       chip.addEventListener('click', function () {
-        var w = findWord(chip.dataset.key);
-        if (w) speakWord(w.word);
+        if (chip.dataset.word) speakWord(chip.dataset.word);
       });
     });
   }
@@ -518,18 +604,21 @@
   }
 
   function jumpToWord(key) {
-    var w = findWord(key);
-    if (!w) return;
-    var idx = shuffledWords.findIndex(function (x) { return wordKey(x) === key; });
-    if (idx === -1) shuffledWords.splice(currentIndex, 0, w);
-    else {
-      var t = shuffledWords[currentIndex];
-      shuffledWords[currentIndex] = shuffledWords[idx];
-      shuffledWords[idx] = t;
-    }
-    currentWord = shuffledWords[currentIndex];
-    loadNextWord();
-    closeSidebar();
+    var ch = Number(key.split(':')[0]);
+    loadChapter(ch).then(function () {
+      var w = findWord(key);
+      if (!w) return;
+      var idx = shuffledWords.findIndex(function (x) { return wordKey(x) === key; });
+      if (idx === -1) shuffledWords.splice(currentIndex, 0, w);
+      else {
+        var t = shuffledWords[currentIndex];
+        shuffledWords[currentIndex] = shuffledWords[idx];
+        shuffledWords[idx] = t;
+      }
+      currentWord = shuffledWords[currentIndex];
+      loadNextWord();
+      closeSidebar();
+    });
   }
 
   /* ---------- 弹窗 ---------- */
@@ -765,6 +854,17 @@
   buildChapterOptions();
   buildSoftKeyboard();
 
+  if (window.speechSynthesis) {
+    speechSynthesis.addEventListener('voiceschanged', refreshVoiceList);
+    refreshVoiceList();
+  }
+
+  voiceSelect.addEventListener('change', function () {
+    SELECTED_VOICE = voiceSelect.value;
+    try { localStorage.setItem(VOICE_KEY, SELECTED_VOICE); } catch (e) { /* 隐私模式忽略 */ }
+    if (currentWord) speakWord(currentWord.word); // 选中即试听
+  });
+
   chapterSelect.addEventListener('change', function () { switchChapter(Number(chapterSelect.value)); });
 
   Array.prototype.forEach.call(document.querySelectorAll('.mode-btn'), function (b) {
@@ -922,14 +1022,14 @@
     } else if (state.poolKeys && state.poolKeys.length && state.poolSource === 'chapter' + (Number(state.chapter) || 1)) {
       var pool2 = state.poolKeys.map(findWord).filter(Boolean);
       if (pool2.length) {
-        currentVocabulary = DATA.chapters[Number(state.chapter)] || pool2;
+        currentVocabulary = VOCAB.chapters[Number(state.chapter)] || pool2;
         shuffledWords = pool2;
         currentIndex = Math.min(currentIndex, shuffledWords.length - 1);
       }
     }
     if (!shuffledWords.length) {
       reviewMode = false;
-      currentVocabulary = DATA.chapters[Number(chapterSelect.value)] || [];
+      currentVocabulary = VOCAB.chapters[Number(chapterSelect.value)] || [];
       shuffledWords = currentVocabulary.slice();
       shuffle(shuffledWords);
       currentIndex = 0;
@@ -941,15 +1041,66 @@
     saveState();
   }
 
-  var state = loadState();
-  if (state) {
-    restore(state);
-  } else {
-    chapterSelect.value = '1';
-    globalMode = 'random';
-    updateModeIndicator(); updateGoalDisplay();
-    switchChapter(1);
-    showOnboarding();
+  function neededChapterIds(state) {
+    var ids = [];
+    if (state) {
+      if (state.reviewMode && state.poolKeys && state.poolKeys.length) {
+        ids = state.poolKeys.map(function (k) { return Number(String(k).split(':')[0]); });
+      } else if (state.poolKeys && state.poolKeys.length && state.poolSource && String(state.poolSource).indexOf('chapter') === 0) {
+        ids = [Number(state.chapter) || 1];
+      } else {
+        ids = [Number(state.chapter) || 1];
+      }
+      (state.wrongBook || []).forEach(function (k) { ids.push(Number(String(k).split(':')[0])); });
+      (state.newWordBook || []).forEach(function (k) { ids.push(Number(String(k).split(':')[0])); });
+    } else {
+      ids = [1];
+    }
+    var seen = {};
+    return ids.filter(function (n) { if (seen[n]) return false; seen[n] = 1; return true; });
+  }
+
+  function startApp(state) {
+    if (state) {
+      restore(state);
+    } else {
+      chapterSelect.value = '1';
+      globalMode = 'random';
+      updateModeIndicator(); updateGoalDisplay();
+      switchChapter(1);
+      showOnboarding();
+    }
+  }
+
+  var initialState = loadState();
+  loadChapters(neededChapterIds(initialState)).then(function () { startApp(initialState); });
+
+  initVisitCounter();
+
+  /* ---------- 全站访问计数（后端 /theo-vocab/api/visits） ---------- */
+  function initVisitCounter() {
+    var el = document.getElementById('visitCounter');
+    if (!el) return;
+    // 接口与站点同前缀：部署在 /theo-vocab/ 下时走该前缀，本地直接打开时回退到 /api/visits
+    var base = (location.pathname.indexOf('/theo-vocab') === 0) ? '/theo-vocab' : '';
+    var api = base + '/api/visits';
+    function render(n) { el.innerHTML = '🌐 全站访问 <strong>' + n + '</strong> 次'; }
+    function call(increment) {
+      fetch(api, { method: increment ? 'POST' : 'GET', headers: { 'Accept': 'application/json' } })
+        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(function (d) { if (d && typeof d.count === 'number') render(d.count); })
+        .catch(function () { /* 计数服务不可用时静默，不破坏页面 */ });
+    }
+    try {
+      if (!sessionStorage.getItem('theo-vocab-visited')) {
+        sessionStorage.setItem('theo-vocab-visited', '1');
+        call(true);   // 本次会话首次访问：自增并返回总数
+      } else {
+        call(false);  // 同一会话内后续加载：仅读取，避免刷新虚增
+      }
+    } catch (e) {
+      call(true);     // 隐私模式等 sessionStorage 不可用时，按每次加载计
+    }
   }
 
   /* ---------- 调试 / 自检句柄 ---------- */

@@ -43,6 +43,10 @@
         <button id="timerToggle" class="tool-btn">⏱️ 计时</button>
         <button id="keyboardToggle" class="tool-btn">⌨️ 软键盘</button>
       </div>
+      <div class="voice-select-wrap" title="选择单词发音语音">
+        <span class="voice-label">🔊 语音</span>
+        <select id="voiceSelect" class="select-style select-sm" aria-label="选择发音语音"></select>
+      </div>
       <div class="goal-progress" id="goalDisplay">
         <span>🎯 每日目标</span>
         <span id="goalCount">0/50</span>
@@ -137,6 +141,7 @@
     <footer class="app-footer">
       <p>词汇课程来自 B 站 <strong>@Theo哥哥教雅思</strong>，内容仅供学习交流。</p>
       <p id="dataInfo"></p>
+      <p id="visitCounter" class="visit-counter">🌐 全站访问 <strong>—</strong> 次</p>
     </footer>
   </main>
 

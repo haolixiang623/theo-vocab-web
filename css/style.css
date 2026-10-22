@@ -139,6 +139,17 @@ body {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   flex-wrap: wrap;
 }
+.voice-select-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--card-bg);
+  border-radius: 16px;
+  padding: 4px 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.voice-label { font-size: 0.85rem; color: var(--text-secondary); font-weight: 600; white-space: nowrap; }
+.select-sm { padding: 6px 10px; border-radius: 12px; font-size: 0.78rem; max-width: 200px; }
 .mode-btn {
   border: none;
   background: transparent;
@@ -703,6 +714,8 @@ button.primary:hover { filter: brightness(1.08); color: #fff; }
   border-top: 1px solid var(--border);
   padding-top: 12px;
 }
+.visit-counter { margin-top: 4px; color: var(--text-secondary); font-size: 0.72rem; }
+.visit-counter strong { color: var(--accent); font-variant-numeric: tabular-nums; }
 
 /* ---- 响应式 ---- */
 @media (max-width: 600px) {
